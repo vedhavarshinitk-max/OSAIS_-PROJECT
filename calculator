@@ -1,0 +1,345 @@
+class CalculatorEngine:
+    """
+    Backend Engine: Handles all calculation logic
+    Responsibility: Process operations, validate inputs, return results
+    No UI dependency - Pure business logic
+    """
+
+    def __init__(self):
+        self.current_expression = ""
+        self.result = None
+        self.error_message = None
+
+    def validate_expression(self, expression):
+
+        if not expression or expression.strip() == "":
+            return False, "Empty expression"
+
+        if "/0" in expression.replace(" ", ""):
+            return False, "Division by zero"
+
+        valid_chars = set("0123456789+-×÷.()")
+        if not all(c in valid_chars or c.isspace() for c in expression):
+            return False, "Invalid characters"
+
+        return True, None
+
+    def process_calculation(self, expression):
+        """
+        Core calculation method
+        Input: Mathematical expression as string
+        Output: Calculation result or error
+        """
+        try:
+
+            is_valid, error = self.validate_expression(expression)
+            if not is_valid:
+                self.error_message = error
+                return None
+
+            processed_expr = expression.replace('×', '*').replace('÷', '/')
+
+            result = eval(processed_expr)
+
+            if isinstance(result, float):
+
+                if result.is_integer():
+                    result = int(result)
+                else:
+                    result = round(result, 8)
+
+            self.result = result
+            self.error_message = None
+            return result
+
+        except ZeroDivisionError:
+            self.error_message = "Cannot divide by zero"
+            return None
+        except Exception as e:
+            self.error_message = f"Calculation error"
+            return None
+
+    def clear_state(self):
+        """Reset calculator state"""
+        self.current_expression = ""
+        self.result = None
+        self.error_message = None
+
+
+
+from IPython.display import display, HTML, Javascript
+import ipywidgets as widgets
+from ipywidgets import Button, Output, VBox, HBox, Layout
+
+class CalculatorUI:
+
+    def __init__(self, backend_engine):
+
+        self.engine = backend_engine
+
+        self.display_text = ""
+
+        self._create_display()
+        self._create_buttons()
+        self._create_layout()
+
+    def _create_display(self):
+        """Create the calculator display screen"""
+        self.display = widgets.HTML(
+            value=self._format_display("0"),
+            layout=Layout(
+                width='100%',
+                height='80px',
+                border='2px solid #333',
+                margin='0 0 10px 0'
+            )
+        )
+
+    def _format_display(self, text):
+        """Format display with mobile-style appearance"""
+        return f"""
+        <div style="
+            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+            color: #ffffff;
+            padding: 20px;
+            text-align: right;
+            font-size: 32px;
+            font-family: 'Courier New', monospace;
+            border-radius: 10px 10px 0 0;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.3);
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        ">
+            {text}
+        </div>
+        """
+
+    def _create_buttons(self):
+        """Create calculator button grid"""
+
+        btn_style = {
+            'width': '70px',
+            'height': '60px',
+            'font_size': '20px',
+            'font_weight': 'bold'
+        }
+
+        operator_style = {'button_color': '#ff9500'}
+        number_style = {'button_color': '#505050'}
+        function_style = {'button_color': '#a6a6a6'}
+
+        button_config = [
+            [('C', function_style), ('⌫', function_style), ('(', operator_style), (')', operator_style)],
+            [('7', number_style), ('8', number_style), ('9', number_style), ('÷', operator_style)],
+            [('4', number_style), ('5', number_style), ('6', number_style), ('×', operator_style)],
+            [('1', number_style), ('2', number_style), ('3', number_style), ('-', operator_style)],
+            [('0', number_style), ('.', number_style), ('=', {'button_color': '#34c759'}), ('+', operator_style)]
+        ]
+
+        self.button_grid = []
+
+        for row in button_config:
+            button_row = []
+            for label, style in row:
+                btn = Button(
+                    description=label,
+                    layout=Layout(**btn_style),
+                    style=style
+                )
+                btn.on_click(self._handle_button_click)
+                button_row.append(btn)
+            self.button_grid.append(HBox(button_row, layout=Layout(justify_content='center')))
+
+    def _create_layout(self):
+        """Assemble complete UI layout"""
+
+        header = widgets.HTML(
+            value="""
+            <div style="
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 15px;
+                text-align: center;
+                font-size: 24px;
+                font-weight: bold;
+                border-radius: 10px 10px 0 0;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            ">
+                📱 Calculator Mobile App
+            </div>
+            """
+        )
+
+        info = widgets.HTML(
+            value="""
+            <div style="
+                background: #f8f9fa;
+                padding: 10px;
+                text-align: center;
+                font-size: 12px;
+                color: #666;
+                border-top: 1px solid #ddd;
+                border-radius: 0 0 10px 10px;
+            ">
+                Frontend ↔ Backend Architecture | Internship Task 3
+            </div>
+            """
+        )
+
+        self.app = VBox(
+            [header, self.display] + self.button_grid + [info],
+            layout=Layout(
+                width='340px',
+                border='3px solid #667eea',
+                border_radius='10px',
+                margin='20px auto',
+                padding='0',
+                box_shadow='0 10px 30px rgba(0,0,0,0.3)'
+            )
+        )
+
+    def _handle_button_click(self, btn):
+        """
+        EVENT HANDLER: Frontend-Backend Communication Bridge
+        This method captures UI events and delegates to backend
+        """
+        label = btn.description
+
+        if label == 'C':
+            self._handle_clear()
+        elif label == '⌫':
+            self._handle_backspace()
+        elif label == '=':
+            self._handle_calculate()
+        else:
+            self._handle_input(label)
+
+    def _handle_clear(self):
+        """Clear button action - communicates with backend"""
+        self.engine.clear_state()
+        self.display_text = ""
+        self._update_display("0")
+
+    def _handle_backspace(self):
+        """Backspace button action"""
+        self.display_text = self.display_text[:-1]
+        self._update_display(self.display_text if self.display_text else "0")
+
+    def _handle_input(self, value):
+        """Number/operator input - updates local state"""
+        self.display_text += value
+        self._update_display(self.display_text)
+
+    def _handle_calculate(self):
+        """
+        CRITICAL METHOD: Frontend → Backend Communication
+        Sends expression to backend and receives result
+        """
+        if not self.display_text:
+            return
+
+        result = self.engine.process_calculation(self.display_text)
+
+        if result is not None:
+            self.display_text = str(result)
+            self._update_display(f"{self.display_text}")
+        else:
+
+            error_msg = self.engine.error_message or "Error"
+            self._update_display(f"⚠️ {error_msg}")
+            self.display_text = ""
+
+    def _update_display(self, text):
+        """Update the visual display"""
+        self.display.value = self._format_display(text)
+
+    def render(self):
+        """Display the calculator UI"""
+        display(self.app)
+
+
+class CalculatorApp:
+    """
+    Application Controller: Orchestrates frontend and backend
+    Implements Dependency Injection and Separation of Concerns
+    """
+
+    def __init__(self):
+
+        self.backend = CalculatorEngine()
+
+        self.frontend = CalculatorUI(self.backend)
+
+    def launch(self):
+
+        print("=" * 60)
+        print("CALCULATOR MOBILE APPLICATION - SYSTEM ARCHITECTURE")
+        print("=" * 60)
+        print("\n📐 ARCHITECTURE OVERVIEW:")
+        print("├── Backend Layer (CalculatorEngine)")
+        print("│   ├── Business Logic")
+        print("│   ├── Input Validation")
+        print("│   └── Error Handling")
+        print("│")
+        print("├── Frontend Layer (CalculatorUI)")
+        print("│   ├── User Interface")
+        print("│   ├── Event Handling")
+        print("│   └── Display Management")
+        print("│")
+        print("└── Integration Layer (CalculatorApp)")
+        print("    ├── Component Orchestration")
+        print("    └── Dependency Management")
+        print("\n" + "=" * 60)
+        print("🔄 DATA FLOW:")
+        print("User Input → Frontend → Backend → Processing → Frontend → Display")
+        print("=" * 60)
+        print("\n✅ Application Ready!\n")
+
+        self.frontend.render()
+
+
+
+if __name__ == "__main__":
+
+    calculator = CalculatorApp()
+    calculator.launch()
+
+    print("\n" + "=" * 60)
+    print("📚 TECHNICAL DOCUMENTATION")
+    print("=" * 60)
+    print("""
+    DESIGN PATTERNS IMPLEMENTED:
+    ✓ Separation of Concerns (SoC)
+    ✓ Dependency Injection (DI)
+    ✓ Model-View-Controller (MVC) variant
+    ✓ Single Responsibility Principle (SRP)
+
+    BACKEND RESPONSIBILITIES:
+    • Mathematical computation
+    • Input validation
+    • Error handling
+    • State management
+
+    FRONTEND RESPONSIBILITIES:
+    • UI rendering
+    • User interaction handling
+    • Display updates
+    • Event routing
+
+    COMMUNICATION FLOW:
+    1. User clicks button
+    2. Frontend captures event
+    3. Frontend calls backend method
+    4. Backend processes request
+    5. Backend returns result
+    6. Frontend updates display
+
+    BENEFITS OF THIS ARCHITECTURE:
+    ✓ Easy to test components independently
+    ✓ Backend can be reused with different frontends
+    ✓ UI changes don't affect calculation logic
+    ✓ Clear separation enables team collaboration
+    ✓ Scalable and maintainable design
+    """)
