@@ -1,0 +1,25 @@
+def cloud_convert(value, from_unit, to_unit):
+    
+    if value < 0:
+        print("AI Error: Invalid input value")
+        return 0
+
+    if from_unit == "cm" and to_unit == "m":
+        return value / 100
+    if from_unit == "m" and to_unit == "cm":
+        return value * 100
+    if from_unit == "g" and to_unit == "kg":
+        return value / 1000
+    if from_unit == "kg" and to_unit == "g":
+        return value * 1000
+
+    return value 
+
+print("=== Cloud-AI Unit Converter ===")
+value = float(input("Enter value: "))
+from_unit = input("From Unit (cm/m/g/kg): ")
+to_unit = input("To Unit (cm/m/g/kg): ")
+
+result = cloud_convert(value, from_unit, to_unit)
+print("Converted Value:", result)
+
