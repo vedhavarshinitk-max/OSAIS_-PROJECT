@@ -1,0 +1,491 @@
+import sqlite3
+import hashlib
+import datetime
+import gradio as gr
+from typing import Optional, List, Tuple
+
+
+def initialize_database():
+    """
+    Creates SQLite database with two tables:
+    1. users - Stores user credentials
+    2. tasks - Stores task information linked to users
+    """
+    conn = sqlite3.connect('todo_app.db', check_same_thread=False)
+    cursor = conn.cursor()
+    
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+            task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+    print("✅ Database initialized successfully!")
+
+
+def hash_password(password: str) -> str:
+    """
+    Hash password using SHA-256 for secure storage
+    """
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def create_user_account(username: str, password: str) -> Tuple[bool, str]:
+    """
+    Register a new user in the system
+    
+    Args:
+        username: Unique username
+        password: User password (will be hashed)
+    
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    if not username or not password:
+        return False, "❌ Username and password cannot be empty!"
+    
+    if len(password) < 6:
+        return False, "❌ Password must be at least 6 characters!"
+    
+    try:
+        conn = sqlite3.connect('todo_app.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        password_hash = hash_password(password)
+        cursor.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)',
+                      (username, password_hash))
+        
+        conn.commit()
+        conn.close()
+        return True, f"✅ Account created successfully! Welcome, {username}!"
+    
+    except sqlite3.IntegrityError:
+        return False, "❌ Username already exists! Please choose another."
+    except Exception as e:
+        return False, f"❌ Error: {str(e)}"
+
+def authenticate_user(username: str, password: str) -> Tuple[bool, Optional[int], str]:
+    """
+    Verify user credentials and return user_id if successful
+    
+    Args:
+        username: Username to authenticate
+        password: Password to verify
+    
+    Returns:
+        Tuple of (success: bool, user_id: Optional[int], message: str)
+    """
+    if not username or not password:
+        return False, None, "❌ Please enter both username and password!"
+    
+    try:
+        conn = sqlite3.connect('todo_app.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        password_hash = hash_password(password)
+        cursor.execute('SELECT user_id FROM users WHERE username = ? AND password_hash = ?',
+                      (username, password_hash))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            return True, result[0], f"✅ Welcome back, {username}!"
+        else:
+            return False, None, "❌ Invalid username or password!"
+    
+    except Exception as e:
+        return False, None, f"❌ Error: {str(e)}"
+
+def insert_task(user_id: int, title: str, description: str) -> Tuple[bool, str]:
+    """
+    Create a new task for the logged-in user
+    
+    Args:
+        user_id: ID of the logged-in user
+        title: Task title
+        description: Task description
+    
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    if not title:
+        return False, "❌ Task title cannot be empty!"
+    
+    try:
+        conn = sqlite3.connect('todo_app.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO tasks (user_id, title, description, status)
+            VALUES (?, ?, ?, 'pending')
+        ''', (user_id, title, description))
+        
+        conn.commit()
+        conn.close()
+        return True, "✅ Task created successfully!"
+    
+    except Exception as e:
+        return False, f"❌ Error: {str(e)}"
+
+def modify_task(task_id: int, title: str, description: str, status: str) -> Tuple[bool, str]:
+    """
+    Update an existing task
+    
+    Args:
+        task_id: ID of the task to modify
+        title: Updated title
+        description: Updated description
+        status: Updated status ('pending' or 'completed')
+    
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    if not title:
+        return False, "❌ Task title cannot be empty!"
+    
+    try:
+        conn = sqlite3.connect('todo_app.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE tasks 
+            SET title = ?, description = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE task_id = ?
+        ''', (title, description, status, task_id))
+        
+        conn.commit()
+        conn.close()
+        return True, "✅ Task updated successfully!"
+    
+    except Exception as e:
+        return False, f"❌ Error: {str(e)}"
+
+def remove_task(task_id: int) -> Tuple[bool, str]:
+    """
+    Permanently delete a task from the database
+    
+    Args:
+        task_id: ID of the task to remove
+    
+    Returns:
+        Tuple of (success: bool, message: str)
+    """
+    try:
+        conn = sqlite3.connect('todo_app.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM tasks WHERE task_id = ?', (task_id,))
+        
+        conn.commit()
+        conn.close()
+        return True, "✅ Task deleted permanently!"
+    
+    except Exception as e:
+        return False, f"❌ Error: {str(e)}"
+
+def list_user_tasks(user_id: int, filter_status: str = 'all') -> List[Tuple]:
+    """
+    Retrieve all tasks for a specific user
+    
+    Args:
+        user_id: ID of the user
+        filter_status: Filter by status ('all', 'pending', 'completed')
+    
+    Returns:
+        List of task tuples
+    """
+    try:
+        conn = sqlite3.connect('todo_app.db', check_same_thread=False)
+        cursor = conn.cursor()
+        
+        if filter_status == 'all':
+            cursor.execute('''
+                SELECT task_id, title, description, status, created_at, updated_at
+                FROM tasks WHERE user_id = ?
+                ORDER BY created_at DESC
+            ''', (user_id,))
+        else:
+            cursor.execute('''
+                SELECT task_id, title, description, status, created_at, updated_at
+                FROM tasks WHERE user_id = ? AND status = ?
+                ORDER BY created_at DESC
+            ''', (user_id, filter_status))
+        
+        tasks = cursor.fetchall()
+        conn.close()
+        return tasks
+    
+    except Exception as e:
+        print(f"Error retrieving tasks: {str(e)}")
+        return []
+
+class AppState:
+    def __init__(self):
+        self.logged_in = False
+        self.user_id = None
+        self.username = None
+        self.selected_task_id = None
+
+state = AppState()
+
+def handle_signup(username, password):
+    """Handle user registration"""
+    success, message = create_user_account(username, password)
+    return message
+
+def handle_login(username, password):
+    """Handle user login"""
+    success, user_id, message = authenticate_user(username, password)
+    
+    if success:
+        state.logged_in = True
+        state.user_id = user_id
+        state.username = username
+        return message, gr.update(visible=False), gr.update(visible=True)
+    else:
+        return message, gr.update(visible=True), gr.update(visible=False)
+
+
+def display_tasks(filter_type):
+    """Display tasks in a formatted table"""
+    if not state.logged_in:
+        return "❌ Please login first!"
+    
+    tasks = list_user_tasks(state.user_id, filter_type)
+    
+    if not tasks:
+        return f"📭 No {filter_type} tasks found."
+    
+    # Format tasks as a table
+    output = f"### 📋 {filter_type.upper()} TASKS\n\n"
+    for task in tasks:
+        task_id, title, desc, status, created, updated = task
+        status_icon = "✅" if status == "completed" else "⏳"
+        output += f"**{status_icon} Task ID: {task_id}**\n"
+        output += f"**Title:** {title}\n"
+        output += f"**Description:** {desc or 'No description'}\n"
+        output += f"**Status:** {status.upper()}\n"
+        output += f"**Created:** {created}\n"
+        output += "---\n\n"
+    
+    return output
+
+def create_new_task(title, description):
+    """Create a new task"""
+    if not state.logged_in:
+        return "❌ Please login first!", ""
+    
+    success, message = insert_task(state.user_id, title, description)
+    
+    if success:
+        return message, display_tasks('all')
+    else:
+        return message, ""
+
+def update_existing_task(task_id, title, description, status):
+    """Update an existing task"""
+    if not state.logged_in:
+        return "❌ Please login first!", ""
+    
+    if not task_id:
+        return "❌ Please enter a Task ID!", ""
+    
+    try:
+        task_id = int(task_id)
+        success, message = modify_task(task_id, title, description, status)
+        
+        if success:
+            return message, display_tasks('all')
+        else:
+            return message, ""
+    except ValueError:
+        return "❌ Invalid Task ID!", ""
+
+def delete_task(task_id):
+    """Delete a task permanently"""
+    if not state.logged_in:
+        return "❌ Please login first!", ""
+    
+    if not task_id:
+        return "❌ Please enter a Task ID!", ""
+    
+    try:
+        task_id = int(task_id)
+        success, message = remove_task(task_id)
+        
+        if success:
+            return message, display_tasks('all')
+        else:
+            return message, ""
+    except ValueError:
+        return "❌ Invalid Task ID!", ""
+
+def handle_logout():
+    """Logout current user"""
+    state.logged_in = False
+    state.user_id = None
+    state.username = None
+    state.selected_task_id = None
+    
+    return "👋 Logged out successfully!", gr.update(visible=True), gr.update(visible=False)
+
+def create_app():
+    """
+    Assemble the complete Gradio mobile application interface
+    """
+    
+    with gr.Blocks(theme=gr.themes.Soft(), title="To-Do Mobile App") as app:
+        
+        gr.Markdown("""
+        # 📱 To-Do Management Mobile Application
+        ### Professional Task Manager with Secure Authentication
+        ---
+        """)
+        
+        
+        
+        with gr.Group(visible=True) as auth_screen:
+            gr.Markdown("## 🔐 User Authentication")
+            
+            with gr.Tab("Login"):
+                login_username = gr.Textbox(label="Username", placeholder="Enter your username")
+                login_password = gr.Textbox(label="Password", type="password", placeholder="Enter your password")
+                login_btn = gr.Button("🔑 Login", variant="primary")
+                login_msg = gr.Markdown()
+            
+            with gr.Tab("Sign Up"):
+                signup_username = gr.Textbox(label="Username", placeholder="Choose a username")
+                signup_password = gr.Textbox(label="Password", type="password", placeholder="Create a password (min 6 characters)")
+                signup_btn = gr.Button("✨ Create Account", variant="primary")
+                signup_msg = gr.Markdown()
+        
+        
+        with gr.Group(visible=False) as dashboard_screen:
+            gr.Markdown("## 📊 Task Dashboard")
+            
+            with gr.Row():
+                logout_btn = gr.Button("🚪 Logout", variant="secondary")
+            
+            
+            with gr.Group():
+                gr.Markdown("### ➕ Create New Task")
+                new_title = gr.Textbox(label="Task Title", placeholder="Enter task title")
+                new_desc = gr.Textbox(label="Description", placeholder="Enter task description (optional)", lines=3)
+                create_btn = gr.Button("✅ Create Task", variant="primary")
+                create_msg = gr.Markdown()
+            
+           
+            with gr.Group():
+                gr.Markdown("### ✏️ Update Task")
+                update_id = gr.Textbox(label="Task ID", placeholder="Enter Task ID to update")
+                update_title = gr.Textbox(label="New Title", placeholder="Enter new title")
+                update_desc = gr.Textbox(label="New Description", placeholder="Enter new description", lines=3)
+                update_status = gr.Radio(["pending", "completed"], label="Status", value="pending")
+                update_btn = gr.Button("💾 Update Task", variant="primary")
+                update_msg = gr.Markdown()
+            
+            
+            with gr.Group():
+                gr.Markdown("### 🗑️ Delete Task")
+                delete_id = gr.Textbox(label="Task ID", placeholder="Enter Task ID to delete")
+                delete_btn = gr.Button("❌ Delete Task Permanently", variant="stop")
+                delete_msg = gr.Markdown()
+            
+            
+            with gr.Group():
+                gr.Markdown("### 📋 Your Tasks")
+                filter_type = gr.Radio(["all", "pending", "completed"], label="Filter Tasks", value="all")
+                refresh_btn = gr.Button("🔄 Refresh Tasks", variant="secondary")
+                tasks_display = gr.Markdown()
+        
+        
+        signup_btn.click(
+            fn=handle_signup,
+            inputs=[signup_username, signup_password],
+            outputs=[signup_msg]
+        )
+        
+        login_btn.click(
+            fn=handle_login,
+            inputs=[login_username, login_password],
+            outputs=[login_msg, auth_screen, dashboard_screen]
+        )
+        
+        
+        create_btn.click(
+            fn=create_new_task,
+            inputs=[new_title, new_desc],
+            outputs=[create_msg, tasks_display]
+        )
+        
+        update_btn.click(
+            fn=update_existing_task,
+            inputs=[update_id, update_title, update_desc, update_status],
+            outputs=[update_msg, tasks_display]
+        )
+        
+        delete_btn.click(
+            fn=delete_task,
+            inputs=[delete_id],
+            outputs=[delete_msg, tasks_display]
+        )
+        
+        refresh_btn.click(
+            fn=display_tasks,
+            inputs=[filter_type],
+            outputs=[tasks_display]
+        )
+        
+        filter_type.change(
+            fn=display_tasks,
+            inputs=[filter_type],
+            outputs=[tasks_display]
+        )
+        
+       
+        logout_btn.click(
+            fn=handle_logout,
+            inputs=[],
+            outputs=[login_msg, auth_screen, dashboard_screen]
+        )
+    
+    return app
+
+if __name__ == "__main__":
+    print("=" * 70)
+    print("TO-DO MANAGEMENT MOBILE APPLICATION")
+    print("OASIS INFOBYTE - Task 2 (Internship Project)")
+    print("=" * 70)
+    
+   
+    initialize_database()
+    
+   
+    app = create_app()
+    
+    print("\n🚀 Launching application...")
+    print("📱 Access your mobile app in the interface below!")
+    print("=" * 70)
+    
+    app.launch(debug=True, share=False)
